@@ -50,7 +50,7 @@ class AtomBrowserContext
       const base::DictionaryValue& options = base::DictionaryValue());
 
   void SetUserAgent(const std::string& user_agent);
-  std::string GetUserAgent() const;
+  std::string GetUserAgent() const override;
   bool CanUseHttpCache() const;
   int GetMaxCacheSize() const;
   AtomBlobReader* GetBlobReader();

@@ -1,0 +1,83 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Samuel Attard <sattard@slack-corp.com>
+Date: Mon, 1 Apr 2019 18:41:01 -0700
+Subject: feat: get service worker user agent from browser context
+
+Routes the ServiceWorkerVersion user_agent param from our BrowserContext
+impl instead of getting the global one.  This allows service worker user
+agents to be configured at a session level.
+
+diff --git a/content/browser/browser_context.cc b/content/browser/browser_context.cc
+index b2b3920da3b082122d317137c7f8064032ddf6d5..7681858c2d347c9f5bfbd4ccb765aca7545ad467 100644
+--- a/content/browser/browser_context.cc
++++ b/content/browser/browser_context.cc
+@@ -766,6 +766,10 @@ std::string BrowserContext::GetMediaDeviceIDSalt() {
+   return unique_id_;
+ }
+ 
++std::string BrowserContext::GetUserAgent() const {
++  return "";
++}
++
+ // static
+ std::string BrowserContext::CreateRandomMediaDeviceIDSalt() {
+   return base::UnguessableToken::Create().ToString();
+diff --git a/content/browser/service_worker/service_worker_process_manager.cc b/content/browser/service_worker/service_worker_process_manager.cc
+index 68718d4f55e89cb5004091f7cfaff9f0df259348..9b428481bb01f8888cf30a4aec5eb0acdb1c73cb 100644
+--- a/content/browser/service_worker/service_worker_process_manager.cc
++++ b/content/browser/service_worker/service_worker_process_manager.cc
+@@ -50,6 +50,11 @@ BrowserContext* ServiceWorkerProcessManager::browser_context() {
+   return browser_context_;
+ }
+ 
++std::string ServiceWorkerProcessManager::GetUserAgentForBrowserContext() {
++  base::AutoLock lock(browser_context_lock_);
++  return browser_context_->GetUserAgent();
++}
++
+ void ServiceWorkerProcessManager::Shutdown() {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   {
+diff --git a/content/browser/service_worker/service_worker_process_manager.h b/content/browser/service_worker/service_worker_process_manager.h
+index 7eada9bf2d9fd6042a488ee2df7be565c287bcba..387c76dcb7970ddf0d547e5cc573906403380055 100644
+--- a/content/browser/service_worker/service_worker_process_manager.h
++++ b/content/browser/service_worker/service_worker_process_manager.h
+@@ -51,6 +51,8 @@ class CONTENT_EXPORT ServiceWorkerProcessManager {
+   // Called on the UI thread.
+   BrowserContext* browser_context();
+ 
++  std::string GetUserAgentForBrowserContext();
++
+   // Synchronously prevents new processes from being allocated
+   // and drops references to RenderProcessHosts. Called on the UI thread.
+   void Shutdown();
+diff --git a/content/browser/service_worker/service_worker_version.cc b/content/browser/service_worker/service_worker_version.cc
+index c6d61cc8795e1eb12f19b5eafec7e80446403afa..f73be87a3e7f76132eb302f25fa610bd90f9e0a6 100644
+--- a/content/browser/service_worker/service_worker_version.cc
++++ b/content/browser/service_worker/service_worker_version.cc
+@@ -1634,7 +1634,11 @@ void ServiceWorkerVersion::StartWorkerInternal() {
+   params->scope = scope_;
+   params->script_url = script_url_;
+   params->script_type = script_type_;
+-  params->user_agent = GetContentClient()->browser()->GetUserAgent();
++  std::string user_agent = context_->process_manager()->GetUserAgentForBrowserContext();
++  if (user_agent.empty()) {
++    user_agent = GetContentClient()->browser()->GetUserAgent();
++  }
++  params->user_agent = user_agent;
+   params->is_installed = IsInstalled(status_);
+   params->pause_after_download = pause_after_download();
+ 
+diff --git a/content/public/browser/browser_context.h b/content/public/browser/browser_context.h
+index 0a6913f2ca560e318f4aebe40189144bcef1bf4f..3e9f199526b781afe17e7d97e6c31e166a836167 100644
+--- a/content/public/browser/browser_context.h
++++ b/content/public/browser/browser_context.h
+@@ -346,6 +346,8 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
+   // Returns a random string by default.
+   virtual std::string GetMediaDeviceIDSalt();
+ 
++  virtual std::string GetUserAgent() const;
++
+   // Utility function useful for embedders. Only needs to be called if
+   // 1) The embedder needs to use a new salt, and
+   // 2) The embedder saves its salt across restarts.
